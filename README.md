@@ -81,7 +81,7 @@ Name | Required Types | Type | Description
 `representative` | `open`, `change` | 64 character hex string | Public key of representative account to assign
 `account` | `open` | 64 character hex string | Public key of the current account
 `signature` | *Optional* | 128 character hex string | Pass precomputed signature in this property. Otherwise, pass `accountKey` argument for block signing.
-`work` | *All* | 16 character hex string | Required for all block types, calculated from account public key for `open` type blocks, previous block hash for all other block types.
+`work` | *All* | 16 character hex string | Required for all block types, calculated from account public key for `open` type blocks, previous block hash for all other block types. See [raiblocks-pow NPM package](https://github.com/numtel/node-raiblocks-pow) for generating this value.
 
 ### Static keyFromAccount(account)
 
