@@ -42,6 +42,8 @@ Create a new listening UDP service.
 
 Publish a message to known peers. Known peers are managed automatically. Upon receiving a message, the peer is added to the top of the list. Up to `maxPeers` peers are kept.
 
+**Returns** only publish messages: hex block hash
+
 Publishing regular `keepalive` messages is important to continure receiving messages:
 
 ```js

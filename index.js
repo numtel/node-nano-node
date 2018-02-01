@@ -78,10 +78,11 @@ class NanoNode extends EventEmitter {
       switch(msg.type) {
         case 'keepalive':
           // Send keepalive to each peer in message
+          const probeKeepalive = renderMessage({type: 'keepalive'}).message;
           msg.body.forEach(address => {
             if(isIpv6(address)) return; // TODO support packets to IPv6 addresses
             const addrParts = parseIp(address);
-            this.client.send(renderMessage({type: 'keepalive'}), addrParts.port, addrParts.address);
+            this.client.send(probeKeepalive, addrParts.port, addrParts.address);
           });
           break;
         case 'publish':
@@ -96,15 +97,24 @@ class NanoNode extends EventEmitter {
 
     this.client.bind(port);
   }
+  /*
+    @param msg        Object   See README for properties
+    @param accountKey String   Optional account private key to sign publish block
+    @param callback   Function Optional
+    @return           String   Block hash hex for publish messages
+   */
   publish(msg, accountKey, callback) {
+    const msgBuffer = renderMessage(msg, accountKey);
+    let retCount = 0, retLimit = this.peers.length;
     this.peers.forEach(address => {
       const addrParts = parseIp(address);
-      const msgBuffer = renderMessage(msg, accountKey);
-      this.client.send(msgBuffer, addrParts.port, addrParts.address, error => {
+      this.client.send(msgBuffer.message, addrParts.port, addrParts.address, error => {
         error && this.emit('error', error);
-        callback && callback(error);
+        retCount++;
+        callback && retCount === retLimit && callback();
       });
     });
+    return msgBuffer.hash;
   }
 }
 
@@ -118,6 +128,7 @@ function isIpv6(ip) {
 /*
  @param msg Object same format as return from parseMessage
  @param accountKey String hex account secret key to sign block (optional)
+ @return { message: Buffer, hash: null | String } hash will be hex string for publish messages
  */
 function renderMessage(msg, accountKey) {
   msg = msg || {};
@@ -140,8 +151,10 @@ function renderMessage(msg, accountKey) {
   // Block type is used as extension value for publish messages
   'extensions' in msg && header.writeInt16BE(msg.extensions, 6);
 
+  let message;
+  let hash = null;
   if(msg.body instanceof Buffer) {
-    return Buffer.concat([ header, msg.body ]);
+    message = Buffer.concat([ header, msg.body ]);
   } else if(msg.body && msg.type === 'publish') {
     if(!('type' in msg.body) || !(msg.body.type in BLOCK_TYPES))
       throw new Error('invalid_block_type');
@@ -175,7 +188,7 @@ function renderMessage(msg, accountKey) {
 
       const context = blake2bInit(32, null);
       blake2bUpdate(context, Buffer.concat(values));
-      const hash = blake2bFinal(context);
+      hash = blake2bFinal(context);
 
       signature = nacl.sign.detached(hash, accountKeyBuf);
     }
@@ -183,11 +196,12 @@ function renderMessage(msg, accountKey) {
     if(work.length !== 8)
       throw new Error('length_mismatch_work');
 
-    return Buffer.concat([header].concat(values).concat([signature, work]));
+    message = Buffer.concat([header].concat(values).concat([signature, work]));
   } else if(msg.type === 'keepalive') {
     // TODO put some peers in the keepalive messages
-    return Buffer.concat([header, Buffer.alloc(144)]);
+    message = Buffer.concat([header, Buffer.alloc(144)]);
   }
+  return { message, hash: hash ? Buffer.from(hash).toString('hex') : null };
 }
 
 function parseIp(buf, offset) {

@@ -12,20 +12,24 @@ node.on('ready', () => {
 // Wait for some initial peer response before sending, not required but
 //  improves chances of block propagation
 setTimeout(() => {
-  console.log('Publishing block...');
-  node.publish({
+  console.log('Publishing block to', node.peers.length, 'peers...');
+  console.log(node.publish({
     type: 'publish',
     body: {
       type: 'receive',
       // Latest block hash on this account (frontier)
-      previous: '0955673479E1183223A953A4E7737B3D50AF207E76DD421E1FBBC75CF8B8E138',
+      previous: '6674116837E39DC27D3EDA360EEACBEE38293896C2EC19D91CEF41A8E9649DB2',
       // Block hash of the pending 'send' block
-      source: 'DA5438F942D73160EBEF76CE3FC8A3EF38F66493720E8AA1AD359341A29F036E',
+      source: '2163B77BC0C31A58B2E2B9448F22D360E60EB9B6A5EDBCE328924DD371E65474',
       // Calculated based of the block hash 'previous'
-      work: 'b7fafd3c7eba801a'
+      work: '985a57eaa0dcb3c2'
     }
   },
   // Also pass account private key for signing block
-  'D95FEEEB8B08DA598821A72199141ED75D5860BCCB0CA4E041E1387207F9C993');
+  'A95C7460479F4DBB14F6E7D2A1EB4B2C5E75C1F9EE386CC5F5CDCBB8F147E565',
+  // Optional callback after all messages have been sent
+  () => {
+    console.log('Publish complete');
+  }));
 }, 10000);
 
