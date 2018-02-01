@@ -11,7 +11,8 @@ node.on('ready', () => {
 
 // Wait for some initial peer response before sending, not required but
 //  improves chances of block propagation
-setInterval(() => {
+setTimeout(() => {
+  console.log('Publishing block...');
   node.publish({
     type: 'publish',
     body: {
