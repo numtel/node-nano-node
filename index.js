@@ -52,7 +52,7 @@ class InvalidMessage extends Error {
     super('invalid_message');
     this.originalError = error;
     this.rinfo = rinfo;
-    this.message = msg;
+    this.data = msg;
   }
 }
 
@@ -104,10 +104,10 @@ class NanoNode extends EventEmitter {
         case 'publish':
           // XXX be wary of validity, without knowing which account, the
           //  signature cannot be verified on published blocks
-          this.emit('block', msg.body);
+          this.emit('block', msg.body, rinfo);
           break;
         case 'confirm_ack':
-          this.emit('vote', msg);
+          this.emit('vote', msg, rinfo);
       }
     });
 

@@ -15,8 +15,8 @@ npm install --save nano-node
 Name | Listener Arguments | Description
 -----|-------------------|-----------------------
 `message` | `msg`, `rinfo` | Network message received
-`block` | `block` | Block received (messages of `publish` type)
-`vote` | `msg` | Vote received (messages of `confirm_ack` type)
+`block` | `block`, `rinfo` | Block received (messages of `publish` type)
+`vote` | `msg`, `rinfo` | Vote received (messages of `confirm_ack` type)
 `ready` | *None* | Server is listening
 `error` | `error` | An error has occurred
 
