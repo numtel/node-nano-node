@@ -28,6 +28,7 @@ Name | Description
 -----|---------------
 `peers` | Array of strings containing hostname concatenated with a colon and the port<br>Default: `['rai.raiblocks.net:7075']`
 `maxPeers` | Maximum number of latest peers to publish new messages<br>Default: 200
+`minimalConfirmAck` | Parsing and validating each `confirm_ack` message as it arrives is very compute intensive due to the 2 blake2b hashes calculated on each receive. Set this value to `false` to parse and validate `comfirm_ack` messages. By default, (`true`) only the `account` public key is parsed.
 
 ### constructor(port)
 

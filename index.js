@@ -66,6 +66,10 @@ class NanoNode extends EventEmitter {
     this.peers = [ 'rai.raiblocks.net:7075' ];
     this.maxPeers = 200;
     this.client = dgram.createSocket('udp4');
+    // confirm_ack messages take a lot of processing power to compute the hashes
+    //  with each incoming message, set this value to true to only parse the
+    //  account value from the message packet
+    this.minimalConfirmAck = true;
 
     this.client.on('error', error => {
       this.emit('error', error);
@@ -74,7 +78,7 @@ class NanoNode extends EventEmitter {
     this.client.on('message', (msg, rinfo) => {
       let buf = Buffer.from(msg);
       try {
-        msg = parseMessage(Buffer.from(msg));
+        msg = parseMessage(Buffer.from(msg), this.minimalConfirmAck);
       } catch(error) {
         this.emit('error', new InvalidMessage(error, rinfo, buf));
         return;
@@ -262,7 +266,7 @@ function parseIp(buf, offset) {
   }
 }
 
-function parseMessage(buf) {
+function parseMessage(buf, minimalConfirmAck) {
   const message = {}
   if(buf[0] !== 0x52)
     throw new Error('magic_number');
@@ -325,23 +329,18 @@ function parseMessage(buf) {
       break;
     case 'confirm_ack':
       const account = buf.slice(8,40);
+      message.account = account.toString('hex');
+
+      if(minimalConfirmAck) {
+        // Skip out early without parsing more
+        message.body = buf.slice(8,buf.length);
+        break;
+      }
+
       const signature = buf.slice(40,104);
       const sequence = buf.slice(104, 112);
-      message.account = account.toString('hex');
       message.signature = signature.toString('hex');
       message.sequence = sequence.toString('hex');
-
-      const blockCtx = blake2bInit(32, null);
-      blake2bUpdate(blockCtx, buf.slice(112,buf.length - 72)); // 72 = signature + work
-      const blockHash = blake2bFinal(blockCtx);
-
-      const msgCtx = blake2bInit(32, null);
-      blake2bUpdate(msgCtx, blockHash);
-      blake2bUpdate(msgCtx, sequence);
-      const msgHash = blake2bFinal(msgCtx);
-
-      if(!nacl.sign.detached.verify(msgHash, signature, account))
-        throw new Error('signature_invalid');
 
       // Parse the block attached to this message
       const msgCopy = Buffer.concat([
@@ -349,7 +348,20 @@ function parseMessage(buf) {
         buf.slice(112, buf.length) // block contents
       ]);
       msgCopy[5] = 0x03; // This copy is parsed as a publish block
-      message.block = parseMessage(msgCopy).body;
+      const blockParsed = parseMessage(msgCopy);
+      message.block = blockParsed.body;
+
+      const blockCtx = blake2bInit(32, null);
+      blake2bUpdate(blockCtx, buf.slice(112,buf.length - 72)); // 72 = signature + work
+      const blockHash = blake2bFinal(blockCtx);
+
+      const msgCtx = blake2bInit(32, null);
+      blake2bUpdate(msgCtx, Buffer.from(blockParsed.body.hash, 'hex'));
+      blake2bUpdate(msgCtx, sequence);
+      const msgHash = blake2bFinal(msgCtx);
+
+      if(!nacl.sign.detached.verify(msgHash, signature, account))
+        throw new Error('signature_invalid');
       break;
     default:
       // no parser defined for this message type
