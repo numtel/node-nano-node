@@ -7,6 +7,7 @@ const nacl = require('./nacl');
 const functions = require('./functions');
 
 const IPV4MASK = Buffer.from('00000000000000000000ffff', 'hex');
+const DEFAULT_FRONTIER_REQ = Buffer.concat([Buffer.alloc(32), Buffer.from('ffffffff', 'hex')]);
 
 const MESSAGE_TYPES = [
   'invalid',
@@ -46,6 +47,15 @@ const REQUIRED_FIELDS = {
   account: { types: [ BLOCK_TYPES.open ], length: 32 }
 };
 
+class InvalidMessage extends Error {
+  constructor(error, rinfo, msg) {
+    super('invalid_message');
+    this.originalError = error;
+    this.rinfo = rinfo;
+    this.message = msg;
+  }
+}
+
 class NanoNode extends EventEmitter {
   /*
    @param port Integer random if unspecified
@@ -62,7 +72,13 @@ class NanoNode extends EventEmitter {
     });
 
     this.client.on('message', (msg, rinfo) => {
-      msg = parseMessage(Buffer.from(msg));
+      let buf = Buffer.from(msg);
+      try {
+        msg = parseMessage(Buffer.from(msg));
+      } catch(error) {
+        this.emit('error', new InvalidMessage(error, rinfo, buf));
+        return;
+      }
 
       // Add this responding peer to list
       const peerAddress = rinfo.address + ':' + rinfo.port;
@@ -86,8 +102,12 @@ class NanoNode extends EventEmitter {
           });
           break;
         case 'publish':
+          // XXX be wary of validity, without knowing which account, the
+          //  signature cannot be verified on published blocks
           this.emit('block', msg.body);
           break;
+        case 'confirm_ack':
+          this.emit('vote', msg);
       }
     });
 
@@ -155,7 +175,7 @@ function renderMessage(msg, accountKey) {
   let hash = null;
   if(msg.body instanceof Buffer) {
     message = Buffer.concat([ header, msg.body ]);
-  } else if(msg.body && msg.type === 'publish') {
+  } else if(msg.body && (msg.type === 'publish' || msg.type === 'confirm_req')) {
     if(!('type' in msg.body) || !(msg.body.type in BLOCK_TYPES))
       throw new Error('invalid_block_type');
 
@@ -200,6 +220,16 @@ function renderMessage(msg, accountKey) {
   } else if(msg.type === 'keepalive') {
     // TODO put some peers in the keepalive messages
     message = Buffer.concat([header, Buffer.alloc(144)]);
+  } else if(msg.type === 'frontier_req') {
+    // TODO allow specifying body with frontier_req messages
+    message = DEFAULT_FRONTIER_REQ;
+  } else if(msg.body && msg.type === 'bulk_pull') {
+    // TODO msg.body field verification
+    message = Buffer.concat([
+      header,
+      Buffer.from(msg.body.start, 'hex'),
+      Buffer.from(msg.body.end, 'hex')
+    ]);
   }
   return { message, hash: hash ? Buffer.from(hash).toString('hex') : null };
 }
@@ -265,6 +295,7 @@ function parseMessage(buf) {
       message.body = peers;
       break;
     case 'publish':
+    case 'confirm_req':
       // message body contains a transaction block
       const block = { type: BLOCK_TYPES_INDEX[message.extensions] }
       if(!block.type)
@@ -291,6 +322,34 @@ function parseMessage(buf) {
       block.work = buf.slice(pos+64, pos+72).reverse().toString('hex');
 
       message.body = block;
+      break;
+    case 'confirm_ack':
+      const account = buf.slice(8,40);
+      const signature = buf.slice(40,104);
+      const sequence = buf.slice(104, 112);
+      message.account = account.toString('hex');
+      message.signature = signature.toString('hex');
+      message.sequence = sequence.toString('hex');
+
+      const blockCtx = blake2bInit(32, null);
+      blake2bUpdate(blockCtx, buf.slice(112,buf.length - 72)); // 72 = signature + work
+      const blockHash = blake2bFinal(blockCtx);
+
+      const msgCtx = blake2bInit(32, null);
+      blake2bUpdate(msgCtx, blockHash);
+      blake2bUpdate(msgCtx, sequence);
+      const msgHash = blake2bFinal(msgCtx);
+
+      if(!nacl.sign.detached.verify(msgHash, signature, account))
+        throw new Error('signature_invalid');
+
+      // Parse the block attached to this message
+      const msgCopy = Buffer.concat([
+        buf.slice(0, 8), // header
+        buf.slice(112, buf.length) // block contents
+      ]);
+      msgCopy[5] = 0x03; // This copy is parsed as a publish block
+      message.block = parseMessage(msgCopy).body;
       break;
     default:
       // no parser defined for this message type
