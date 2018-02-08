@@ -78,7 +78,7 @@ class NanoNode extends EventEmitter {
     this.client.on('message', (msg, rinfo) => {
       let buf = Buffer.from(msg);
       try {
-        msg = parseMessage(Buffer.from(msg), this.minimalConfirmAck);
+        msg = NanoNode.parseMessage(Buffer.from(msg), this.minimalConfirmAck);
       } catch(error) {
         this.emit('error', new InvalidMessage(error, rinfo, buf));
         return;
@@ -98,7 +98,7 @@ class NanoNode extends EventEmitter {
       switch(msg.type) {
         case 'keepalive':
           // Send keepalive to each peer in message
-          const probeKeepalive = renderMessage({type: 'keepalive'}).message;
+          const probeKeepalive = NanoNode.renderMessage({type: 'keepalive'}).message;
           msg.body.forEach(address => {
             if(isIpv6(address)) return; // TODO support packets to IPv6 addresses
             const addrParts = parseIp(address);
@@ -122,13 +122,18 @@ class NanoNode extends EventEmitter {
     this.client.bind(port);
   }
   /*
-    @param msg        Object   See README for properties
+    @param msg        Object   See README for properties, or pass rendered Buffer
     @param accountKey String   Optional account private key to sign publish block
     @param callback   Function Optional
     @return           String   Block hash hex for publish messages
    */
   publish(msg, accountKey, callback) {
-    const msgBuffer = renderMessage(msg, accountKey);
+    let msgBuffer;
+    if(msg instanceof Buffer) {
+      msgBuffer = { message: msg };
+    } else {
+      msgBuffer = NanoNode.renderMessage(msg, accountKey);
+    }
     let retCount = 0, retLimit = this.peers.length;
     this.peers.forEach(address => {
       const addrParts = parseIp(address);
@@ -154,7 +159,7 @@ function isIpv6(ip) {
  @param accountKey String hex account secret key to sign block (optional)
  @return { message: Buffer, hash: null | String } hash will be hex string for publish messages
  */
-function renderMessage(msg, accountKey) {
+NanoNode.renderMessage = function(msg, accountKey) {
   msg = msg || {};
 
   const type = MESSAGE_TYPES.indexOf(msg.type);
@@ -214,7 +219,7 @@ function renderMessage(msg, accountKey) {
       blake2bUpdate(context, Buffer.concat(values));
       hash = blake2bFinal(context);
 
-      signature = nacl.sign.detached(hash, accountKeyBuf);
+      signature = Buffer.from(nacl.sign.detached(hash, accountKeyBuf));
     }
     const work = Buffer.from(msg.body.work, 'hex').reverse();
     if(work.length !== 8)
@@ -266,7 +271,7 @@ function parseIp(buf, offset) {
   }
 }
 
-function parseMessage(buf, minimalConfirmAck) {
+NanoNode.parseMessage = function(buf, minimalConfirmAck) {
   const message = {}
   if(buf[0] !== 0x52)
     throw new Error('magic_number');
@@ -350,10 +355,6 @@ function parseMessage(buf, minimalConfirmAck) {
       msgCopy[5] = 0x03; // This copy is parsed as a publish block
       const blockParsed = parseMessage(msgCopy);
       message.block = blockParsed.body;
-
-      const blockCtx = blake2bInit(32, null);
-      blake2bUpdate(blockCtx, buf.slice(112,buf.length - 72)); // 72 = signature + work
-      const blockHash = blake2bFinal(blockCtx);
 
       const msgCtx = blake2bInit(32, null);
       blake2bUpdate(msgCtx, Buffer.from(blockParsed.body.hash, 'hex'));

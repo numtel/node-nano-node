@@ -1,5 +1,6 @@
 /* Utility functions exported as static functions on NanoNode class */
-const { blake2b } = require('./blake2b');
+const { blake2b, blake2bInit, blake2bUpdate, blake2bFinal } = require('./blake2b');
+const nacl = require('./nacl');
 /*
 BSD 3-Clause License
 Copyright (c) 2017, SergiySW
@@ -171,4 +172,31 @@ exports.accountFromKey = function(hex)
 	
 }
 
+/*
+  Calculate key/address pair for a specific account in wallet
+  @param  seed         Buffer 32 byte long, or 64 character hex string
+  @param  accountIndex Number 32-bit unsigned integer
+  @return Object { privateKey, publicKey, address }
+ */
+exports.accountPair = function(seed, accountIndex) {
+  const context = blake2bInit(32);
 
+  const indexBuffer = Buffer.alloc(4);
+  indexBuffer.writeInt32BE(accountIndex);
+
+  if(typeof seed === 'string' && /^[A-Fa-f0-9]{64}$/.test(seed))
+    seed = Buffer.from(seed, hex);
+  else if(!(seed instanceof Buffer))
+    throw new Error('invalid_seed');
+
+  blake2bUpdate(context, seed);
+  blake2bUpdate(context, indexBuffer);
+
+  const privKey = Buffer.from(blake2bFinal(context));
+  const pubKeyHex = Buffer.from(nacl.sign.keyPair.fromSecretKey(privKey).publicKey).toString('hex');
+  return {
+    privateKey: privKey.toString('hex'),
+    publicKey: pubKeyHex,
+    address: exports.accountFromKey(pubKeyHex)
+  };
+}

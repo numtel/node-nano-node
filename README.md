@@ -38,7 +38,7 @@ Create a new listening UDP service.
 
 ### publish(msg, accountKey, callback)
 
-* `msg` `<Object>` Required, message definition, currently only supports types `keepalive`, `publish`.
+* `msg` `<Object>` Required, message definition, currently only supports types `keepalive`, `publish`. May also pass fully rendered messages as `Buffer`.
 * `accountKey` `<String>` If `publish` message and no signature provided, pass account private key as hex string for block signing.
 * `callback` `<Function` Optional, callback function
 
@@ -87,6 +87,22 @@ Name | Required Types | Type | Description
 `signature` | *Optional* | 128 character hex string | Pass precomputed signature in this property. Otherwise, pass `accountKey` argument for block signing.
 `work` | *All* | 16 character hex string | Required for all block types, calculated from account public key for `open` type blocks, previous block hash for all other block types. See [raiblocks-pow NPM package](https://github.com/numtel/node-raiblocks-pow) for generating this value.
 
+### Static parseMessage(buf, minimalConfirmAck)
+
+* `buf` `<Buffer>` Required, full UDP message
+* `minimalConfirmAck` `<Boolean>` Optional, default: true. Only parse account value of vote (confirm_ack) messages
+
+Returns an object with the properties of the message
+
+### Static renderMessage(msg, accountKey)
+
+Useful for obtaining a block's hash without publishing it yet.
+
+* `msg` `<Object>` Required, message properties as described above
+* `accountKey` `<String>` Required to sign blocks for `publish`, `confirm_req` messages, otherwise provide signature property
+
+Returns an object `{ message: <Buffer>, hash: <String|null> }` `hash` is block hash if available
+
 ### Static keyFromAccount(account)
 
 * `account` `<String>` Required, account address to convert
@@ -98,6 +114,13 @@ Return the public key for a given address
 * `key` `<String>` Required, public key to convert
 
 Return the address for a given account public key
+
+### Static accountPair(seed, index)
+
+* `seed` `<String|Buffer>` Required, wallet seed as 32 byte Buffer or 64 character hex string
+* `index` `<Number>` Required, 32-bit unsigned integer specifying account index
+
+Returns an object `{privateKey: <String>, publicKey: <String>, address: <string>}`
 
 ## License
 
