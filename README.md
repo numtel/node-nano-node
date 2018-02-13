@@ -1,6 +1,27 @@
 # Node.js Nano Node
 
-UDP Node for [Nano currency](https://nano.org) (Formerly [Raiblocks](https://raiblocks.net)) for Node.js.
+Partial (light, leech) Node for [Nano currency](https://nano.org) (Formerly [Raiblocks](https://raiblocks.net)) for Node.js.
+
+**Examples:**
+
+* [Pending](examples/pending.js): How to listen for new pending blocks on a specific account
+* [Receive](examples/receive.js): How to publish a block
+* [Pull](examples/pull.js): How to fetch an account blockchain history
+
+## Table of Contents
+
+* [Installation](#installation)
+* [class NanoNode extends EventEmitter](#class-nanonode-extends-eventemitter)
+  * [Events Emitted](#events-emitted)
+  * [Properties](#properties)
+  * [constructor(port)](#constructorport)
+  * [publish(msg, accountKey, callback)](#publishmsg-accountkey-callback)
+  * [fetchAccount(publicKey, callback)](#fetchaccountpublickey-callback)
+  * [Static parseMessage(buf, minimalConfirmAck)](#static-parsemessagebuf-minimalconfirmack)
+  * [Static renderMessage(msg, accountKey)](#static-rendermessagemsg-accountkey)
+  * [Static keyFromAccount(account)](#static-keyfromaccountaccount)
+  * [Static accountFromKey(key)](#static-accountfromkeykey)
+  * [Static accountPair(seed, index)](#static-accountpairseed-index)
 
 ## Installation
 
@@ -29,6 +50,7 @@ Name | Description
 `peers` | Array of strings containing hostname concatenated with a colon and the port<br>Default: `['rai.raiblocks.net:7075']`
 `maxPeers` | Maximum number of latest peers to publish new messages<br>Default: 200
 `minimalConfirmAck` | Parsing and validating each `confirm_ack` message as it arrives is very compute intensive due to the 2 blake2b hashes calculated on each receive. Set this value to `false` to parse and validate `comfirm_ack` messages. By default, (`true`) only the `account` public key is parsed.
+`tcpTimeout` | Duration to wait when performing TCP operations in milliseconds<br>Default: 4000
 
 ### constructor(port)
 
@@ -38,13 +60,13 @@ Create a new listening UDP service.
 
 ### publish(msg, accountKey, callback)
 
-* `msg` `<Object>` Required, message definition, currently only supports types `keepalive`, `publish`. May also pass fully rendered messages as `Buffer`.
+* `msg` `<Object>` Required, message definition, supports types `keepalive`, `publish`, `confirm_req`. May also pass fully rendered messages as `Buffer`.
 * `accountKey` `<String>` If `publish` message and no signature provided, pass account private key as hex string for block signing.
-* `callback` `<Function` Optional, callback function
+* `callback` `<Function>` Optional, callback function
 
 Publish a message to known peers. Known peers are managed automatically. Upon receiving a message, the peer is added to the top of the list. Up to `maxPeers` peers are kept.
 
-**Returns** only publish messages: hex block hash
+**Returns** only on `publish` and `confirm_req` messages: hex block hash
 
 Publishing regular `keepalive` messages is important to continure receiving messages:
 
@@ -59,7 +81,6 @@ setInterval(() => {
 
 #### Message Properties
 
-See [examples/pending.js](examples/pending.js) for an example of how to listen for new pending blocks on a specific account.
 
 Name | Default | Type | Description
 -----|--------|-------|--------------
@@ -73,7 +94,6 @@ Name | Default | Type | Description
 
 #### Publish Body Object Properties
 
-See [examples/receive.js](examples/receive.js) for an example of how to publish a block.
 
 Name | Required Types | Type | Description
 -----|----------------|----|---
@@ -86,6 +106,23 @@ Name | Required Types | Type | Description
 `account` | `open` | 64 character hex string | Public key of the current account
 `signature` | *Optional* | 128 character hex string | Pass precomputed signature in this property. Otherwise, pass `accountKey` argument for block signing.
 `work` | *All* | 16 character hex string | Required for all block types, calculated from account public key for `open` type blocks, previous block hash for all other block types. See [raiblocks-pow NPM package](https://github.com/numtel/node-raiblocks-pow) for generating this value.
+
+### fetchAccount(publicKey, callback)
+
+* `publicKey` `<String>` Required, account public key to fetch block history
+* `callback` `<Function>` `error, result`
+
+Connect to known peers over TCP and send a `bulk_pull` message for a single account. Wait until timeout from `tcpTimeout` property, then determine the longest valid chain returned.
+
+Without a full lattice database, the balance of an account can not be determined unless the frontier block is a `send` block.
+
+**Result object properties:**
+
+Name | Type | Description
+----|-------|--------------
+`blocks`| Array | Transaction history sorted newest to oldest
+`matchProportion`| Number | Between 0 and 1 indicating the proportion of peer responses that match this chain. A value of 1 means all responding peers agree on this length.
+`returnCount`| Number | Count of peer responses returned before timeout
 
 ### Static parseMessage(buf, minimalConfirmAck)
 

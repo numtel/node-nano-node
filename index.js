@@ -1,5 +1,6 @@
 const EventEmitter = require('events');
 const dgram = require('dgram');
+const net = require('net');
 
 const { blake2bInit, blake2bUpdate, blake2bFinal } = require('./blake2b');
 // raiblocks version uses 32-byte secret keys instead of 64-bytes
@@ -7,6 +8,9 @@ const nacl = require('./nacl');
 const functions = require('./functions');
 
 const IPV4MASK = Buffer.from('00000000000000000000ffff', 'hex');
+const IPV6_PATTERN = /^\[[A-Fa-f0-9:]+\]:[0-9]+$/;
+const HEX64CHAR_PATTERN = /^[A-F-a-f0-9]{64}$/;
+const BULK_PULL_PREFIX = Buffer.from('52430505010300', 'hex');
 const DEFAULT_FRONTIER_REQ = Buffer.concat([Buffer.alloc(32), Buffer.from('ffffffff', 'hex')]);
 
 const MESSAGE_TYPES = [
@@ -22,6 +26,8 @@ const MESSAGE_TYPES = [
 ];
 
 const BLOCK_TYPES = {
+  invalid: 0x00,
+  not_a_block: 0x01,
   send: 0x02,
   receive: 0x03,
   open: 0x04,
@@ -56,6 +62,13 @@ class InvalidMessage extends Error {
   }
 }
 
+class ParseError extends Error {
+  constructor(msg, data) {
+    super(msg);
+    this.data = data;
+  }
+}
+
 class NanoNode extends EventEmitter {
   /*
    @param port Integer random if unspecified
@@ -65,6 +78,8 @@ class NanoNode extends EventEmitter {
 
     this.peers = [ 'rai.raiblocks.net:7075' ];
     this.maxPeers = 200;
+    this.tcpTimeout = 4000;
+
     this.client = dgram.createSocket('udp4');
     // confirm_ack messages take a lot of processing power to compute the hashes
     //  with each incoming message, set this value to true to only parse the
@@ -100,7 +115,7 @@ class NanoNode extends EventEmitter {
           // Send keepalive to each peer in message
           const probeKeepalive = NanoNode.renderMessage({type: 'keepalive'}).message;
           msg.body.forEach(address => {
-            if(isIpv6(address)) return; // TODO support packets to IPv6 addresses
+            if(IPV6_PATTERN.test(address)) return; // TODO support packets to IPv6 addresses
             const addrParts = parseIp(address);
             this.client.send(probeKeepalive, addrParts.port, addrParts.address);
           });
@@ -145,14 +160,64 @@ class NanoNode extends EventEmitter {
     });
     return msgBuffer.hash;
   }
+
+  /*
+    @param publicKey String    Account public key to fetch
+    @param callback  Function  error, result
+    @return          Undefined
+   */
+  fetchAccount(publicKey, callback) {
+    let retCount = 0, retLimit = this.peers.length;
+    const responses = [];
+    this.peers.forEach(address => {
+      const addrParts = parseIp(address);
+      const client = net.createConnection({
+        host: addrParts.address,
+        port: addrParts.port
+      }, () => {
+        // Connected to server
+        client.write(NanoNode.renderMessage({
+          type: 'bulk_pull',
+          body: publicKey
+        }).message);
+      });
+
+      let blocks = [];
+      let remaining = Buffer.alloc(0);
+      client.on('data', (data) => {
+        const buf = Buffer.concat([ remaining, data ]);
+
+        const parsed = NanoNode.parseChain(buf);
+        remaining = parsed.remaining;
+        blocks = blocks.concat(parsed.blocks);
+        if(remaining === null) {
+          client.end();
+          responses.push(blocks);
+        }
+      });
+
+      client.on('error', error => {
+        client.destroy();
+        clientReturn();
+      });
+
+      client.on('end', () => clientReturn());
+
+      setTimeout(() => {
+        client.destroy();
+        clientReturn();
+      }, this.tcpTimeout);
+
+      function clientReturn() {
+        retCount++;
+        callback && retCount === retLimit && callback(null, pullStats(responses));
+      }
+    });
+  }
 }
 
 // Static utility functions
 Object.assign(NanoNode, functions);
-
-function isIpv6(ip) {
-  return /^\[[A-Fa-f0-9:]+\]:[0-9]+$/.test(ip);
-}
 
 /*
  @param msg Object same format as return from parseMessage
@@ -164,7 +229,7 @@ NanoNode.renderMessage = function(msg, accountKey) {
 
   const type = MESSAGE_TYPES.indexOf(msg.type);
   if(type === -1)
-    throw new Error('invalid_type');
+    throw new ParseError('invalid_type', msg);
 
   const header = Buffer.from([
     0x52, // magic number
@@ -186,7 +251,7 @@ NanoNode.renderMessage = function(msg, accountKey) {
     message = Buffer.concat([ header, msg.body ]);
   } else if(msg.body && (msg.type === 'publish' || msg.type === 'confirm_req')) {
     if(!('type' in msg.body) || !(msg.body.type in BLOCK_TYPES))
-      throw new Error('invalid_block_type');
+      throw new ParseError('invalid_block_type', msg);
 
     // Update extension value in header
     header.writeInt16BE(BLOCK_TYPES_INDEX.indexOf(msg.body.type), 6);
@@ -198,11 +263,11 @@ NanoNode.renderMessage = function(msg, accountKey) {
     
     const values = fields.map(field => {
       if(!(field in msg.body))
-        throw new Error('missing_field_' + field)
+        throw new ParseError('missing_field_' + field, msg);
 
       const value = Buffer.from(msg.body[field], 'hex');
       if(value.length !== REQUIRED_FIELDS[field].length)
-        throw new Error('length_mismatch_' + field);
+        throw new ParseError('length_mismatch_' + field, msg);
 
       return value;
     });
@@ -213,7 +278,7 @@ NanoNode.renderMessage = function(msg, accountKey) {
     } else if(accountKey) {
       const accountKeyBuf = Buffer.from(accountKey, 'hex');
       if(accountKeyBuf.length !== 32)
-        throw new Error('length_mismatch_private_key');
+        throw new ParseError('length_mismatch_private_key', msg);
 
       const context = blake2bInit(32, null);
       blake2bUpdate(context, Buffer.concat(values));
@@ -223,7 +288,7 @@ NanoNode.renderMessage = function(msg, accountKey) {
     }
     const work = Buffer.from(msg.body.work, 'hex').reverse();
     if(work.length !== 8)
-      throw new Error('length_mismatch_work');
+      throw new ParseError('length_mismatch_work', msg);
 
     message = Buffer.concat([header].concat(values).concat([signature, work]));
   } else if(msg.type === 'keepalive') {
@@ -233,11 +298,18 @@ NanoNode.renderMessage = function(msg, accountKey) {
     // TODO allow specifying body with frontier_req messages
     message = DEFAULT_FRONTIER_REQ;
   } else if(msg.body && msg.type === 'bulk_pull') {
-    // TODO msg.body field verification
+    // TODO support pulling multiple accounts at once
+    let start, end;
+    if(typeof msg.body === 'string' && HEX64CHAR_PATTERN.test(msg.body)) {
+      start = msg.body;
+      end = msg.body;
+    } else {
+      throw new ParseError('invalid_account', msg);
+    }
     message = Buffer.concat([
       header,
-      Buffer.from(msg.body.start, 'hex'),
-      Buffer.from(msg.body.end, 'hex')
+      Buffer.from(start, 'hex'),
+      Buffer.from(end, 'hex')
     ]);
   }
   return { message, hash: hash ? Buffer.from(hash).toString('hex') : null };
@@ -271,23 +343,84 @@ function parseIp(buf, offset) {
   }
 }
 
+function pullStats(responses) {
+  let maxLen = 0, longIndex = null, matches = 0;
+
+  const nonEmpties = responses.filter(response => {
+    return response.length > 0;
+  });
+
+  for(let i=0; i<nonEmpties.length; i++) {
+    if(nonEmpties[i].length > maxLen) {
+      maxLen = nonEmpties[i].length;
+      longIndex = i;
+      matches = 1;
+    } else if(nonEmpties[i].length === maxLen) {
+      matches++;
+    }
+  }
+
+  return {
+    blocks: longIndex !== null ? nonEmpties[longIndex] : null,
+    matchProportion: matches / nonEmpties.length,
+    returnCount: nonEmpties.length
+  };
+}
+
+function blockLength(type) {
+  return Object.keys(REQUIRED_FIELDS).reduce((out, param) => {
+    if(REQUIRED_FIELDS[param].types.indexOf(type) !== -1) {
+      out += REQUIRED_FIELDS[param].length;
+    }
+    return out;
+  }, 0);
+}
+
+NanoNode.parseChain = function(buf) {
+  let offset = 0;
+  let remaining = Buffer.alloc(0);
+  let output = [];
+
+  while(buf.length > offset) {
+    const blockType = buf[offset];
+    let blockLen = blockLength(blockType) + 1; // + type byte
+    if(blockType === BLOCK_TYPES.not_a_block) {
+      remaining = null;
+    } else {
+      blockLen += 64 + 8; // + sig + work
+      if(buf.length < offset+blockLen) {
+        // This portion will be continued in the next packet
+        remaining = buf.slice(offset, buf.length);
+      } else {
+        const msg = Buffer.concat([
+          BULK_PULL_PREFIX,
+          buf.slice(offset, offset+blockLen)
+        ]);
+        output.push(NanoNode.parseMessage(msg).body);
+      }
+    }
+    offset += blockLen;
+  }
+  return { blocks: output, remaining: remaining };
+}
+
 NanoNode.parseMessage = function(buf, minimalConfirmAck) {
   const message = {}
   if(buf[0] !== 0x52)
-    throw new Error('magic_number');
+    throw new ParseError('magic_number', buf);
 
   message.mainnet = false;
   if(buf[1] === 0x43)
     message.mainnet = true;
   else if(buf[1] !== 0x41)
-    throw new Error('invalid_network');
+    throw new ParseError('invalid_network', buf);
 
   message.versionMax = buf[2];
   message.versionUsing = buf[3];
   message.versionMin = buf[4];
 
   if(buf[5] >= MESSAGE_TYPES.length)
-    throw new Error('invalid_type');
+    throw new ParseError('invalid_type', buf);
   message.type = MESSAGE_TYPES[buf[5]];
 
   message.extensions = buf.readUInt16BE(6);
@@ -297,7 +430,7 @@ NanoNode.parseMessage = function(buf, minimalConfirmAck) {
       // message body contains a list of 8 peers
       const peers = [];
       if(buf.length !== 152)
-        throw new Error('invalid_block_length');
+        throw new ParseError('invalid_block_length', buf);
       for(let i=8; i<152; i+=18) {
         peers.push(parseIp(buf, i));
       }
@@ -308,7 +441,7 @@ NanoNode.parseMessage = function(buf, minimalConfirmAck) {
       // message body contains a transaction block
       const block = { type: BLOCK_TYPES_INDEX[message.extensions] }
       if(!block.type)
-        throw new Error('invalid_block_type');
+        throw new ParseError('invalid_block_type', buf);
       const fields = Object.keys(REQUIRED_FIELDS).reduce((out, param) => {
         if(REQUIRED_FIELDS[param].types.indexOf(BLOCK_TYPES[block.type]) !== -1) out.push(param);
         return out;
@@ -321,7 +454,7 @@ NanoNode.parseMessage = function(buf, minimalConfirmAck) {
         pos += length;
       }
       if(buf.length !== pos+72)
-        throw new Error('invalid_block_length');
+        throw new ParseError('invalid_block_length', buf);
 
       const context = blake2bInit(32, null);
       blake2bUpdate(context, buf.slice(8,pos));
@@ -362,7 +495,7 @@ NanoNode.parseMessage = function(buf, minimalConfirmAck) {
       const msgHash = blake2bFinal(msgCtx);
 
       if(!nacl.sign.detached.verify(msgHash, signature, account))
-        throw new Error('signature_invalid');
+        throw new ParseError('signature_invalid', msg);
       break;
     default:
       // no parser defined for this message type
