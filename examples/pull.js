@@ -16,7 +16,6 @@ node.on('message', (msg, rinfo) => {
   if(!hasFetched && node.peers.length === node.maxPeers) {
     hasFetched = true;
     node.fetchAccount(acct, (error, result) => {
-      account = result;
       console.log(error, result);
       node.client.close();
     });

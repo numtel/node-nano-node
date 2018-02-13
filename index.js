@@ -43,6 +43,15 @@ const BLOCK_TYPES_INDEX = [
   'change'
 ];
 
+const BLOCK_LENGTHS = [
+  0,  // invalid
+  0,  // not_a_block
+  80, // send
+  64, // receive
+  96, // open
+  32  //change
+];
+
 const REQUIRED_FIELDS = {
   // These are listed in the order that they need to be hashed
   previous: { types: [ BLOCK_TYPES.send, BLOCK_TYPES.receive, BLOCK_TYPES.change ], length: 32 },
@@ -367,15 +376,6 @@ function pullStats(responses) {
   };
 }
 
-function blockLength(type) {
-  return Object.keys(REQUIRED_FIELDS).reduce((out, param) => {
-    if(REQUIRED_FIELDS[param].types.indexOf(type) !== -1) {
-      out += REQUIRED_FIELDS[param].length;
-    }
-    return out;
-  }, 0);
-}
-
 NanoNode.parseChain = function(buf) {
   let offset = 0;
   let remaining = Buffer.alloc(0);
@@ -383,7 +383,7 @@ NanoNode.parseChain = function(buf) {
 
   while(buf.length > offset) {
     const blockType = buf[offset];
-    let blockLen = blockLength(blockType) + 1; // + type byte
+    let blockLen = BLOCK_LENGTHS[blockType] + 1; // + type byte
     if(blockType === BLOCK_TYPES.not_a_block) {
       remaining = null;
     } else {
