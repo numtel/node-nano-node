@@ -31,7 +31,8 @@ const BLOCK_TYPES = {
   send: 0x02,
   receive: 0x03,
   open: 0x04,
-  change: 0x05
+  change: 0x05,
+  state: 0x06
 };
 
 const BLOCK_TYPES_INDEX = [
@@ -40,7 +41,8 @@ const BLOCK_TYPES_INDEX = [
   'send',
   'receive',
   'open',
-  'change'
+  'change',
+  'state'
 ];
 
 const BLOCK_LENGTHS = [
@@ -54,12 +56,13 @@ const BLOCK_LENGTHS = [
 
 const REQUIRED_FIELDS = {
   // These are listed in the order that they need to be hashed
-  previous: { types: [ BLOCK_TYPES.send, BLOCK_TYPES.receive, BLOCK_TYPES.change ], length: 32 },
+  previous: { types: [ BLOCK_TYPES.send, BLOCK_TYPES.receive, BLOCK_TYPES.change, BLOCK_TYPES.state ], length: 32 },
   destination: { types: [ BLOCK_TYPES.send ], length: 32 },
-  balance: { types: [ BLOCK_TYPES.send ], length: 16 },
+  balance: { types: [ BLOCK_TYPES.send, BLOCK_TYPES.state ], length: 16 },
   source: { types: [ BLOCK_TYPES.receive, BLOCK_TYPES.open ], length: 32 },
-  representative: { types: [ BLOCK_TYPES.open, BLOCK_TYPES.change ], length: 32 },
-  account: { types: [ BLOCK_TYPES.open ], length: 32 }
+  representative: { types: [ BLOCK_TYPES.open, BLOCK_TYPES.change, BLOCK_TYPES.state ], length: 32 },
+  account: { types: [ BLOCK_TYPES.open, BLOCK_TYPES.state ], length: 32 },
+  link: { types: [ BLOCK_TYPES.state ], length: 32 }
 };
 
 class InvalidMessage extends Error {
@@ -243,8 +246,8 @@ NanoNode.renderMessage = function(msg, accountKey) {
   const header = Buffer.from([
     0x52, // magic number
     !('mainnet' in msg) || msg.mainnet ? 0x43 : 0x41, // 43 for mainnet, 41 for testnet
-    'versionMax' in msg ? msg.versionMax : 0x05,
-    'versionUsing' in msg ? msg.versionUsing: 0x05,
+    'versionMax' in msg ? msg.versionMax : 0x07,
+    'versionUsing' in msg ? msg.versionUsing: 0x07,
     'versionMin' in msg ? msg.versionMin : 0x01,
     type,
     0x00, // extensions 16-bits
