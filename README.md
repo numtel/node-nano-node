@@ -7,6 +7,8 @@ Partial (light, leech) Node for [Nano currency](https://nano.org) (Formerly [Rai
 * [Pending](examples/pending.js): How to listen for new pending blocks on a specific account
 * [Receive](examples/receive.js): How to publish a block
 * [Pull](examples/pull.js): How to fetch an account blockchain history
+* [Votes](examples/votes.js): How to listen for representative votes
+* [State Blocks](examples/stateblocks.js): How to listen for state blocks
 
 ## Table of Contents
 
@@ -97,13 +99,14 @@ Name | Default | Type | Description
 
 Name | Required Types | Type | Description
 -----|----------------|----|---
-`type` | *All* | String | `send`, `receive`, `open`, `change`
-`previous` | `send`, `receive`, `change` | 64 character hex string | Hash of previous block in account
+`type` | *All* | String | `send`, `receive`, `open`, `change`, `state`
+`previous` | `send`, `receive`, `change`, `state` | 64 character hex string | Hash of previous block in account
 `destination` | `send` | 64 character hex string | Account public key of recipient
-`balance` | `send` | 32 character hex string | New balance of account
+`balance` | `send`, `state` | 32 character hex string | New balance of account
 `source` | `receive`, `open` | 64 character hex string | Hash of pending `send` block
-`representative` | `open`, `change` | 64 character hex string | Public key of representative account to assign
-`account` | `open` | 64 character hex string | Public key of the current account
+`representative` | `open`, `change`, `state` | 64 character hex string | Public key of representative account to assign
+`account` | `open`, `state` | 64 character hex string | Public key of the current account
+`link` | `state` | 64 character hex string | Public key of the current account
 `signature` | *Optional* | 128 character hex string | Pass precomputed signature in this property. Otherwise, pass `accountKey` argument for block signing.
 `work` | *All* | 16 character hex string | Required for all block types, calculated from account public key for `open` type blocks, previous block hash for all other block types. See [raiblocks-pow NPM package](https://github.com/numtel/node-raiblocks-pow) for generating this value.
 
