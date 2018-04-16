@@ -88,8 +88,8 @@ Name | Default | Type | Description
 -----|--------|-------|--------------
 `type` | *None* | String | Required, `keepalive` or `publish`
 `mainnet` | `true` | Boolean | Optional, True (default) for mainnet, false for testnet
-`versionMax` | `5` | Integer | Optional
-`versionUsing` | `5` | Integer | Optional
+`versionMax` | `7` | Integer | Optional
+`versionUsing` | `7` | Integer | Optional
 `versionMin` | `1` | Integer | Optional
 `extensions` | `0` | Integer | Optional, overwritten with block type for `publish` messages
 `body` | *None* | Object | Required for `publish` messages
