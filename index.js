@@ -66,6 +66,12 @@ const REQUIRED_FIELDS = {
   link: { types: [ BLOCK_TYPES.state ], length: 32 }
 };
 
+// Specify block types whose field hashing order do not match
+//  the REQUIRED_FIELDS dictionary.
+const SPECIAL_ORDERING = {
+  state: [ 'account', 'previous', 'representative', 'balance', 'link' ]
+};
+
 class InvalidMessage extends Error {
   constructor(error, rinfo, msg) {
     super('invalid_message');
@@ -269,11 +275,7 @@ NanoNode.renderMessage = function(msg, accountKey) {
     // Update extension value in header
     header.writeInt16BE(BLOCK_TYPES_INDEX.indexOf(msg.body.type), 6);
 
-    const fields = Object.keys(REQUIRED_FIELDS).reduce((out, param) => {
-      if(REQUIRED_FIELDS[param].types.indexOf(BLOCK_TYPES[msg.body.type]) !== -1) out.push(param);
-      return out;
-    }, []);
-    
+    const fields = blockFields(msg.body.type);
     const values = fields.map(field => {
       if(!(field in msg.body))
         throw new ParseError('missing_field_' + field, msg);
@@ -326,6 +328,16 @@ NanoNode.renderMessage = function(msg, accountKey) {
     ]);
   }
   return { message, hash: hash ? Buffer.from(hash).toString('hex') : null };
+}
+
+function blockFields(blockType) {
+  if(blockType in SPECIAL_ORDERING)
+    return SPECIAL_ORDERING[blockType];
+
+  return Object.keys(REQUIRED_FIELDS).reduce((out, param) => {
+    if(REQUIRED_FIELDS[param].types.indexOf(BLOCK_TYPES[blockType]) !== -1) out.push(param);
+    return out;
+  }, []);
 }
 
 function parseIp(buf, offset) {
@@ -446,10 +458,7 @@ NanoNode.parseMessage = function(buf, minimalConfirmAck) {
       const block = { type: BLOCK_TYPES_INDEX[message.extensions] }
       if(!block.type)
         throw new ParseError('invalid_block_type', buf);
-      const fields = Object.keys(REQUIRED_FIELDS).reduce((out, param) => {
-        if(REQUIRED_FIELDS[param].types.indexOf(BLOCK_TYPES[block.type]) !== -1) out.push(param);
-        return out;
-      }, []);
+      const fields = blockFields(block.type);
 
       let pos=8;
       for(let i=0; i<fields.length; i++) {
