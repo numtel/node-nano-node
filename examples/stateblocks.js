@@ -3,7 +3,7 @@ const NanoNode = require('..');
 const node = new NanoNode(12000);
 
 node.on('block', (block, rinfo) => {
-  if(block.type == 'state')
+  if(block.type === 'state')
     console.log(block)
 });
 

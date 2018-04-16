@@ -3,11 +3,11 @@ const NanoNode = require('..');
 const node = new NanoNode(12000);
 
 const watchAccount = 'xrb_3arg3asgtigae3xckabaaewkx3bzsh7nwz7jkmjos79ihyaxwphhm6qgjps4';
+const watchPublicKey = NanoNode.accountFromKey(watchAccount);
 
 node.on('vote', (msg, rinfo) => {
-  var account = NanoNode.accountFromKey(msg.account);
-  if(account == watchAccount)
-    console.log('Vote from ' + NanoNode.accountFromKey(msg.account) + ' via ' + rinfo.address + ':' + rinfo.port);
+  if(msg.account === watchPublicKey)
+    console.log('Vote from', watchAccount, 'via', rinfo.address, ':', rinfo.port);
 });
 
 node.on('error', error => {
