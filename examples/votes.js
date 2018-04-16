@@ -7,7 +7,7 @@ const watchAccount = 'xrb_3arg3asgtigae3xckabaaewkx3bzsh7nwz7jkmjos79ihyaxwphhm6
 node.on('vote', (msg, rinfo) => {
   var account = NanoNode.accountFromKey(msg.account);
   if(account == watchAccount)
-    //console.log('Vote from ' + NanoNode.accountFromKey(msg.account) + ' via ' + rinfo.address + ':' + rinfo.port);
+    console.log('Vote from ' + NanoNode.accountFromKey(msg.account) + ' via ' + rinfo.address + ':' + rinfo.port);
 });
 
 node.on('error', error => {
