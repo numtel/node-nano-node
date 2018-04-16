@@ -51,7 +51,7 @@ const BLOCK_LENGTHS = [
   80, // send
   64, // receive
   96, // open
-  32, // change
+  64, // change
   144 // state
 ];
 
