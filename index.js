@@ -72,6 +72,11 @@ const SPECIAL_ORDERING = {
   state: [ 'account', 'previous', 'representative', 'balance', 'link' ]
 };
 
+// Specify block types whose work value is represented in big-endian format
+const BIG_ENDIAN_WORK = [
+  'state'
+];
+
 class InvalidMessage extends Error {
   constructor(error, rinfo, msg) {
     super('invalid_message');
@@ -301,7 +306,10 @@ NanoNode.renderMessage = function(msg, accountKey) {
 
       signature = Buffer.from(nacl.sign.detached(hash, accountKeyBuf));
     }
-    const work = Buffer.from(msg.body.work, 'hex').reverse();
+    let work = Buffer.from(msg.body.work, 'hex')
+    if(!(msg.body.type in BIG_ENDIAN_WORK))
+      work = work.reverse();
+
     if(work.length !== 8)
       throw new ParseError('length_mismatch_work', msg);
 
@@ -474,7 +482,11 @@ NanoNode.parseMessage = function(buf, minimalConfirmAck) {
       block.hash = Buffer.from(blake2bFinal(context)).toString('hex');
 
       block.signature = buf.slice(pos, pos+64).toString('hex');
-      block.work = buf.slice(pos+64, pos+72).reverse().toString('hex');
+
+      let work = buf.slice(pos+64, pos+72);
+      if(!(block.type in BIG_ENDIAN_WORK))
+        work = work.reverse();
+      block.work = work.toString('hex');
 
       message.body = block;
       break;
