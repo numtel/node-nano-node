@@ -51,7 +51,8 @@ const BLOCK_LENGTHS = [
   80, // send
   64, // receive
   96, // open
-  32  //change
+  32, // change
+  144 // state
 ];
 
 const REQUIRED_FIELDS = {
