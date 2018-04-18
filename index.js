@@ -292,6 +292,10 @@ NanoNode.renderMessage = function(msg, accountKey) {
       return value;
     });
 
+    const context = blake2bInit(32, null);
+    blake2bUpdate(context, Buffer.concat(values));
+    hash = blake2bFinal(context);
+
     let signature
     if('signature' in msg.body) {
       signature = Buffer.from(msg.body.signature, 'hex');
@@ -299,15 +303,10 @@ NanoNode.renderMessage = function(msg, accountKey) {
       const accountKeyBuf = Buffer.from(accountKey, 'hex');
       if(accountKeyBuf.length !== 32)
         throw new ParseError('length_mismatch_private_key', msg);
-
-      const context = blake2bInit(32, null);
-      blake2bUpdate(context, Buffer.concat(values));
-      hash = blake2bFinal(context);
-
       signature = Buffer.from(nacl.sign.detached(hash, accountKeyBuf));
     }
     let work = Buffer.from(msg.body.work, 'hex')
-    if(!(msg.body.type in BIG_ENDIAN_WORK))
+    if(BIG_ENDIAN_WORK.indexOf(msg.body.type) === -1)
       work = work.reverse();
 
     if(work.length !== 8)
@@ -315,8 +314,39 @@ NanoNode.renderMessage = function(msg, accountKey) {
 
     message = Buffer.concat([header].concat(values).concat([signature, work]));
   } else if(msg.type === 'keepalive') {
-    // TODO put some peers in the keepalive messages
     message = Buffer.concat([header, Buffer.alloc(144)]);
+    if(msg.body instanceof Array) {
+      // Put some peers in the keepalive messages
+      if(msg.body.length > 8) throw new ParseError('too_many_peers', msg);
+      msg.body.forEach((address, index) => {
+        if(IPV6_PATTERN.test(address))
+          throw new ParseError('ipv6_not_supported');
+        const parts = address.split(/[\.:]/);
+
+        // Must match x.x.x.x:xx
+        if(parts.length !== 5)
+          throw new ParseError('invalid_address');
+
+        message[header.length + (16 * index) + 10] = 255;
+        message[header.length + (16 * index) + 11] = 255;
+
+        parts.forEach((val, i) => {
+          const pos = header.length + (16 * index) + 12 + i;
+          val = parseInt(val, 10);
+
+          if(isNaN(val))
+            throw new ParseError('invalid_address');
+
+          if(i === 4) {
+            // Port value is 2 bytes
+            message.writeUInt16LE(val, pos);
+          } else {
+            message[pos] = val;
+          }
+        });
+
+      });
+    }
   } else if(msg.type === 'frontier_req') {
     // TODO allow specifying body with frontier_req messages
     message = DEFAULT_FRONTIER_REQ;
@@ -456,7 +486,9 @@ NanoNode.parseMessage = function(buf, minimalConfirmAck) {
       if(buf.length !== 152)
         throw new ParseError('invalid_block_length', buf);
       for(let i=8; i<152; i+=18) {
-        peers.push(parseIp(buf, i));
+        const peer = parseIp(buf, i);
+        if(peer !== '[::]:0')
+          peers.push(peer);
       }
       message.body = peers;
       break;
@@ -484,7 +516,7 @@ NanoNode.parseMessage = function(buf, minimalConfirmAck) {
       block.signature = buf.slice(pos, pos+64).toString('hex');
 
       let work = buf.slice(pos+64, pos+72);
-      if(!(block.type in BIG_ENDIAN_WORK))
+      if(BIG_ENDIAN_WORK.indexOf(block.type) === -1)
         work = work.reverse();
       block.work = work.toString('hex');
 

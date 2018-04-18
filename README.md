@@ -1,5 +1,7 @@
 # Node.js Nano Node
 
+[![Build Status](https://travis-ci.org/numtel/node-nano-node.svg?branch=master)](https://travis-ci.org/numtel/node-nano-node)
+
 Partial (light, leech) Node for [Nano currency](https://nano.org) (Formerly [Raiblocks](https://raiblocks.net)) for Node.js.
 
 **Examples:**
