@@ -4,7 +4,7 @@
   "description": "Publish blocks to raiblocks",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node test.js"
   },
   "author": "numtel <ben@latenightsketches.com>",
   "repository": "numtel/node-nano-node",

@@ -31,7 +31,8 @@ const BLOCK_TYPES = {
   send: 0x02,
   receive: 0x03,
   open: 0x04,
-  change: 0x05
+  change: 0x05,
+  state: 0x06
 };
 
 const BLOCK_TYPES_INDEX = [
@@ -40,7 +41,8 @@ const BLOCK_TYPES_INDEX = [
   'send',
   'receive',
   'open',
-  'change'
+  'change',
+  'state'
 ];
 
 const BLOCK_LENGTHS = [
@@ -49,18 +51,31 @@ const BLOCK_LENGTHS = [
   80, // send
   64, // receive
   96, // open
-  32  //change
+  64, // change
+  144 // state
 ];
 
 const REQUIRED_FIELDS = {
   // These are listed in the order that they need to be hashed
-  previous: { types: [ BLOCK_TYPES.send, BLOCK_TYPES.receive, BLOCK_TYPES.change ], length: 32 },
+  previous: { types: [ BLOCK_TYPES.send, BLOCK_TYPES.receive, BLOCK_TYPES.change, BLOCK_TYPES.state ], length: 32 },
   destination: { types: [ BLOCK_TYPES.send ], length: 32 },
-  balance: { types: [ BLOCK_TYPES.send ], length: 16 },
+  balance: { types: [ BLOCK_TYPES.send, BLOCK_TYPES.state ], length: 16 },
   source: { types: [ BLOCK_TYPES.receive, BLOCK_TYPES.open ], length: 32 },
-  representative: { types: [ BLOCK_TYPES.open, BLOCK_TYPES.change ], length: 32 },
-  account: { types: [ BLOCK_TYPES.open ], length: 32 }
+  representative: { types: [ BLOCK_TYPES.open, BLOCK_TYPES.change, BLOCK_TYPES.state ], length: 32 },
+  account: { types: [ BLOCK_TYPES.open, BLOCK_TYPES.state ], length: 32 },
+  link: { types: [ BLOCK_TYPES.state ], length: 32 }
 };
+
+// Specify block types whose field hashing order do not match
+//  the REQUIRED_FIELDS dictionary.
+const SPECIAL_ORDERING = {
+  state: [ 'account', 'previous', 'representative', 'balance', 'link' ]
+};
+
+// Specify block types whose work value is represented in big-endian format
+const BIG_ENDIAN_WORK = [
+  'state'
+];
 
 class InvalidMessage extends Error {
   constructor(error, rinfo, msg) {
@@ -243,8 +258,8 @@ NanoNode.renderMessage = function(msg, accountKey) {
   const header = Buffer.from([
     0x52, // magic number
     !('mainnet' in msg) || msg.mainnet ? 0x43 : 0x41, // 43 for mainnet, 41 for testnet
-    'versionMax' in msg ? msg.versionMax : 0x05,
-    'versionUsing' in msg ? msg.versionUsing: 0x05,
+    'versionMax' in msg ? msg.versionMax : 0x07,
+    'versionUsing' in msg ? msg.versionUsing: 0x07,
     'versionMin' in msg ? msg.versionMin : 0x01,
     type,
     0x00, // extensions 16-bits
@@ -265,11 +280,7 @@ NanoNode.renderMessage = function(msg, accountKey) {
     // Update extension value in header
     header.writeInt16BE(BLOCK_TYPES_INDEX.indexOf(msg.body.type), 6);
 
-    const fields = Object.keys(REQUIRED_FIELDS).reduce((out, param) => {
-      if(REQUIRED_FIELDS[param].types.indexOf(BLOCK_TYPES[msg.body.type]) !== -1) out.push(param);
-      return out;
-    }, []);
-    
+    const fields = blockFields(msg.body.type);
     const values = fields.map(field => {
       if(!(field in msg.body))
         throw new ParseError('missing_field_' + field, msg);
@@ -281,6 +292,10 @@ NanoNode.renderMessage = function(msg, accountKey) {
       return value;
     });
 
+    const context = blake2bInit(32, null);
+    blake2bUpdate(context, Buffer.concat(values));
+    hash = blake2bFinal(context);
+
     let signature
     if('signature' in msg.body) {
       signature = Buffer.from(msg.body.signature, 'hex');
@@ -288,21 +303,50 @@ NanoNode.renderMessage = function(msg, accountKey) {
       const accountKeyBuf = Buffer.from(accountKey, 'hex');
       if(accountKeyBuf.length !== 32)
         throw new ParseError('length_mismatch_private_key', msg);
-
-      const context = blake2bInit(32, null);
-      blake2bUpdate(context, Buffer.concat(values));
-      hash = blake2bFinal(context);
-
       signature = Buffer.from(nacl.sign.detached(hash, accountKeyBuf));
     }
-    const work = Buffer.from(msg.body.work, 'hex').reverse();
+    let work = Buffer.from(msg.body.work, 'hex')
+    if(BIG_ENDIAN_WORK.indexOf(msg.body.type) === -1)
+      work = work.reverse();
+
     if(work.length !== 8)
       throw new ParseError('length_mismatch_work', msg);
 
     message = Buffer.concat([header].concat(values).concat([signature, work]));
   } else if(msg.type === 'keepalive') {
-    // TODO put some peers in the keepalive messages
     message = Buffer.concat([header, Buffer.alloc(144)]);
+    if(msg.body instanceof Array) {
+      // Put some peers in the keepalive messages
+      if(msg.body.length > 8) throw new ParseError('too_many_peers', msg);
+      msg.body.forEach((address, index) => {
+        if(IPV6_PATTERN.test(address))
+          throw new ParseError('ipv6_not_supported');
+        const parts = address.split(/[\.:]/);
+
+        // Must match x.x.x.x:xx
+        if(parts.length !== 5)
+          throw new ParseError('invalid_address');
+
+        message[header.length + (16 * index) + 10] = 255;
+        message[header.length + (16 * index) + 11] = 255;
+
+        parts.forEach((val, i) => {
+          const pos = header.length + (16 * index) + 12 + i;
+          val = parseInt(val, 10);
+
+          if(isNaN(val))
+            throw new ParseError('invalid_address');
+
+          if(i === 4) {
+            // Port value is 2 bytes
+            message.writeUInt16LE(val, pos);
+          } else {
+            message[pos] = val;
+          }
+        });
+
+      });
+    }
   } else if(msg.type === 'frontier_req') {
     // TODO allow specifying body with frontier_req messages
     message = DEFAULT_FRONTIER_REQ;
@@ -322,6 +366,16 @@ NanoNode.renderMessage = function(msg, accountKey) {
     ]);
   }
   return { message, hash: hash ? Buffer.from(hash).toString('hex') : null };
+}
+
+function blockFields(blockType) {
+  if(blockType in SPECIAL_ORDERING)
+    return SPECIAL_ORDERING[blockType];
+
+  return Object.keys(REQUIRED_FIELDS).reduce((out, param) => {
+    if(REQUIRED_FIELDS[param].types.indexOf(BLOCK_TYPES[blockType]) !== -1) out.push(param);
+    return out;
+  }, []);
 }
 
 function parseIp(buf, offset) {
@@ -432,7 +486,9 @@ NanoNode.parseMessage = function(buf, minimalConfirmAck) {
       if(buf.length !== 152)
         throw new ParseError('invalid_block_length', buf);
       for(let i=8; i<152; i+=18) {
-        peers.push(parseIp(buf, i));
+        const peer = parseIp(buf, i);
+        if(peer !== '[::]:0')
+          peers.push(peer);
       }
       message.body = peers;
       break;
@@ -442,10 +498,7 @@ NanoNode.parseMessage = function(buf, minimalConfirmAck) {
       const block = { type: BLOCK_TYPES_INDEX[message.extensions] }
       if(!block.type)
         throw new ParseError('invalid_block_type', buf);
-      const fields = Object.keys(REQUIRED_FIELDS).reduce((out, param) => {
-        if(REQUIRED_FIELDS[param].types.indexOf(BLOCK_TYPES[block.type]) !== -1) out.push(param);
-        return out;
-      }, []);
+      const fields = blockFields(block.type);
 
       let pos=8;
       for(let i=0; i<fields.length; i++) {
@@ -461,7 +514,11 @@ NanoNode.parseMessage = function(buf, minimalConfirmAck) {
       block.hash = Buffer.from(blake2bFinal(context)).toString('hex');
 
       block.signature = buf.slice(pos, pos+64).toString('hex');
-      block.work = buf.slice(pos+64, pos+72).reverse().toString('hex');
+
+      let work = buf.slice(pos+64, pos+72);
+      if(BIG_ENDIAN_WORK.indexOf(block.type) === -1)
+        work = work.reverse();
+      block.work = work.toString('hex');
 
       message.body = block;
       break;
