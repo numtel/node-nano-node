@@ -1,6 +1,6 @@
 {
   "name": "nano-node",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Publish blocks to raiblocks",
   "main": "index.js",
   "scripts": {
