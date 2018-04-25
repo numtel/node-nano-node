@@ -185,7 +185,7 @@ exports.accountPair = function(seed, accountIndex) {
   indexBuffer.writeInt32BE(accountIndex);
 
   if(typeof seed === 'string' && /^[A-Fa-f0-9]{64}$/.test(seed))
-    seed = Buffer.from(seed, hex);
+    seed = Buffer.from(seed, 'hex');
   else if(!(seed instanceof Buffer))
     throw new Error('invalid_seed');
 
